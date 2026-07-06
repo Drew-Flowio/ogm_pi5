@@ -1,5 +1,9 @@
 # Offgrid Minds Agent Control Center MVP
 
+> **Note:** The maintained copy lives at
+> [`internal_tools/ogm_control_center/`](../internal_tools/ogm_control_center/).
+> This top-level `control_center/` folder is a legacy snapshot kept for reference.
+
 Local Mission Control dashboard for managing future Offgrid Minds agents before
 autonomous research, pack compilation, or publishing exists.
 
