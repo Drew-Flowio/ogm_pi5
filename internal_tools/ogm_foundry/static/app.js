@@ -69,6 +69,25 @@ function renderStack(containerId, items, renderItem) {
   }
 }
 
+function badgeClass(kind, value) {
+  const normalized = String(value || "").toLowerCase();
+  if (kind === "license" && (normalized === "needs_review" || normalized === "restricted" || normalized === "rejected")) {
+    return "badge badge-warn";
+  }
+  if (kind === "publication" && (normalized === "internal_only" || normalized === "not_publishable")) {
+    return "badge badge-warn";
+  }
+  if (kind === "publication" && (normalized === "publishable" || normalized === "pack_ready")) {
+    return "badge badge-ok";
+  }
+  return "badge";
+}
+
+function renderBadge(value, kind) {
+  const label = value || "unknown";
+  return `<span class="${badgeClass(kind, label)}">${label}</span>`;
+}
+
 function renderMessage(id, message) {
   const node = document.getElementById(id);
   if (node) {
@@ -186,8 +205,11 @@ function renderDashboard(data) {
     row.innerHTML = `
       <td>${item.title}</td>
       <td>${item.status}</td>
+      <td>${renderBadge(item.source_format, "format")}</td>
+      <td>${renderBadge(item.source_authority_type || item.source_type, "authority")}</td>
+      <td>${renderBadge(item.license_status, "license")}</td>
+      <td>${renderBadge(item.publication_status, "publication")}</td>
       <td class="mono">${item.proposed_canonical_reference_type}</td>
-      <td>${item.has_local_file ? "yes" : "no"}</td>
     `;
     candidateBody.appendChild(row);
   }
@@ -196,6 +218,22 @@ function renderDashboard(data) {
   setText("vault-revisions", formatNumber(vault.revisions));
   setText("vault-bytes", formatBytes(vault.archived_bytes));
   renderMessage("vault-message", vault.message);
+
+  const vaultBody = document.getElementById("vault-table-body");
+  if (vaultBody) {
+    vaultBody.innerHTML = "";
+    for (const item of vault.items || []) {
+      const row = document.createElement("tr");
+      row.innerHTML = `
+        <td>${item.filename || "—"}</td>
+        <td>${renderBadge(item.source_format, "format")}</td>
+        <td>${renderBadge(item.source_authority_type, "authority")}</td>
+        <td>${renderBadge(item.license_status, "license")}</td>
+        <td>${renderBadge(item.publication_status, "publication")}</td>
+      `;
+      vaultBody.appendChild(row);
+    }
+  }
 
   setText("curator-agent", curator.agent_id || "—");
   setText("curator-scope", curator.scope || "—");

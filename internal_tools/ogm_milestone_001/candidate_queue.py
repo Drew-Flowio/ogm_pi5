@@ -12,6 +12,7 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from internal_tools.ogm_milestone_001.records import OperationalRecords
 from internal_tools.ogm_milestone_001.schema import migrate_intake_operational_schema
+from internal_tools.ogm_milestone_001.source_taxonomy import enrich_candidate_record, normalize_candidate_taxonomy
 from internal_tools.ogm_milestone_001.utils import json_dumps, json_loads, prefixed_uuid, sha256_file, utc_now_iso
 
 
@@ -79,6 +80,9 @@ class CandidateIntakeQueue:
         assigned_reviewer: str | None = None,
         review_due_at: str | None = None,
         review_priority: str | None = None,
+        source_format: str | None = None,
+        source_authority_type: str | None = None,
+        publication_status: str | None = None,
         metadata: dict[str, Any] | None = None,
         actor: str | None = None,
     ) -> dict[str, Any]:
@@ -103,6 +107,17 @@ class CandidateIntakeQueue:
             file_checksum=file_checksum,
         )
         duplicate_of_candidate_id = duplicates[0]["candidate_id"] if duplicates else None
+        taxonomy = normalize_candidate_taxonomy(
+            source_type=source_type,
+            source_format=source_format,
+            source_authority_type=source_authority_type,
+            publication_status=publication_status,
+            license_status=license_status,
+            local_file_path=file_path,
+            url=url,
+            notes=notes,
+            reviewer_notes=reviewer_notes,
+        )
 
         with self._connect() as conn:
             conn.execute(
@@ -115,9 +130,10 @@ class CandidateIntakeQueue:
                     license_text_excerpt, license_checked_at, license_checked_by, authority_score,
                     authority_reason, risk_notes, reviewer_notes, assigned_reviewer,
                     review_due_at, review_priority, duplicate_of_candidate_id,
-                    curator_recommendation_id, metadata_json, updated_at
+                    curator_recommendation_id, source_format, source_authority_type,
+                    publication_status, metadata_json, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     candidate_id,
@@ -127,7 +143,7 @@ class CandidateIntakeQueue:
                     normalized_url,
                     str(file_path) if file_path is not None else None,
                     file_checksum,
-                    source_type,
+                    taxonomy["source_type"],
                     submitted_by,
                     now,
                     mission_id,
@@ -150,6 +166,9 @@ class CandidateIntakeQueue:
                     review_priority,
                     duplicate_of_candidate_id,
                     None,
+                    taxonomy["source_format"],
+                    taxonomy["source_authority_type"],
+                    taxonomy["publication_status"],
                     json_dumps({**(metadata or {}), "duplicate_candidates": duplicates}),
                     now,
                 ),
@@ -371,6 +390,11 @@ class CandidateIntakeQueue:
             if strict_license_review:
                 raise ValueError(license_warning)
 
+        enriched = enrich_candidate_record(candidate)
+        publication_warning = "; ".join(enriched.get("publication_warnings") or [])
+        if enriched.get("publication_status") in {"internal_only", "not_publishable"}:
+            publication_warning = publication_warning or f"publication_status={enriched['publication_status']}"
+
         return {
             "file_path": local_file_path,
             "source": candidate["publisher"],
@@ -384,16 +408,27 @@ class CandidateIntakeQueue:
             "human_approval_id": approval["approval_id"],
             "source_quality_score": candidate["authority_score"],
             "canonical_reference_type": candidate["proposed_canonical_reference_type"],
+            "source_format": enriched["source_format"],
+            "source_authority_type": enriched["source_authority_type"],
+            "publication_status": enriched["publication_status"],
             "metadata": {
                 "candidate_id": candidate_id,
                 "candidate_title": candidate["title"],
                 "source_location": candidate["source_location"],
+                "legacy_source_type": candidate["source_type"],
+                "source_format": enriched["source_format"],
+                "source_authority_type": enriched["source_authority_type"],
+                "publication_status": enriched["publication_status"],
+                "canonical_reference_type": candidate["proposed_canonical_reference_type"],
+                "pack_ready": enriched.get("pack_ready", False),
+                "publication_warnings": enriched.get("publication_warnings") or [],
                 "license_notes": candidate["license_notes"],
                 "license_source_url": candidate["license_source_url"],
                 "license_text_excerpt": candidate["license_text_excerpt"],
                 "license_checked_at": candidate["license_checked_at"],
                 "license_checked_by": candidate["license_checked_by"],
                 "license_warning": license_warning,
+                "publication_warning": publication_warning or None,
                 "authority_reason": candidate["authority_reason"],
                 "risk_notes": candidate["risk_notes"],
                 "reviewer_notes": candidate["reviewer_notes"],
@@ -486,7 +521,7 @@ class CandidateIntakeQueue:
         return [self._review_event_from_row(row) for row in rows]
 
     def _candidate_from_row(self, row: sqlite3.Row) -> dict[str, Any]:
-        return {
+        candidate = {
             "candidate_id": row["candidate_id"],
             "title": row["title"],
             "publisher": row["publisher"],
@@ -517,9 +552,13 @@ class CandidateIntakeQueue:
             "review_priority": row["review_priority"],
             "duplicate_of_candidate_id": row["duplicate_of_candidate_id"],
             "curator_recommendation_id": row["curator_recommendation_id"],
+            "source_format": row["source_format"] if "source_format" in row.keys() else None,
+            "source_authority_type": row["source_authority_type"] if "source_authority_type" in row.keys() else None,
+            "publication_status": row["publication_status"] if "publication_status" in row.keys() else None,
             "metadata": json_loads(row["metadata_json"], {}),
             "updated_at": row["updated_at"],
         }
+        return enrich_candidate_record(candidate)
 
     def _review_event_from_row(self, row: sqlite3.Row) -> dict[str, Any]:
         return {

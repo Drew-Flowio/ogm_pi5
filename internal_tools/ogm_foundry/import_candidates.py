@@ -13,6 +13,7 @@ from internal_tools.ogm_foundry.config import FoundryConfig
 from internal_tools.ogm_foundry.workspace_spec import CANDIDATE_REQUIRED_FIELDS, CANDIDATE_TEMPLATE_FIELDS
 from internal_tools.ogm_milestone_001.candidate_queue import CandidateIntakeQueue
 from internal_tools.ogm_milestone_001.records import OperationalRecords
+from internal_tools.ogm_milestone_001.source_taxonomy import normalize_candidate_taxonomy
 
 
 def _clean(value: str | None) -> str | None:
@@ -27,13 +28,31 @@ def parse_candidate_row(row: dict[str, str], *, row_number: int) -> dict[str, An
     missing = [field for field in CANDIDATE_REQUIRED_FIELDS if not normalized.get(field)]
     if missing:
         raise ValueError(f"row {row_number}: missing required fields: {', '.join(missing)}")
+    if not normalized.get("source_authority_type") and not normalized.get("source_type"):
+        raise ValueError(
+            f"row {row_number}: requires source_authority_type or legacy source_type"
+        )
     if not normalized.get("url") and not normalized.get("local_file_path"):
         raise ValueError(f"row {row_number}: requires url or local_file_path")
+
+    taxonomy = normalize_candidate_taxonomy(
+        source_type=normalized.get("source_type"),
+        source_format=normalized.get("source_format"),
+        source_authority_type=normalized.get("source_authority_type"),
+        publication_status=normalized.get("publication_status"),
+        license_status=normalized.get("license_status"),
+        local_file_path=normalized.get("local_file_path"),
+        url=normalized.get("url"),
+        notes=normalized.get("notes"),
+    )
 
     payload: dict[str, Any] = {
         "title": normalized["title"],
         "publisher": normalized["publisher"],
-        "source_type": normalized["source_type"],
+        "source_type": taxonomy["source_type"],
+        "source_format": taxonomy["source_format"],
+        "source_authority_type": taxonomy["source_authority_type"],
+        "publication_status": taxonomy["publication_status"],
         "submitted_by": normalized["submitted_by"],
         "mission_id": normalized["mission_id"],
         "coverage_object_id": normalized["coverage_object_id"],

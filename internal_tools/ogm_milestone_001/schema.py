@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
+
+from internal_tools.ogm_milestone_001.source_taxonomy import (
+    infer_publication_status,
+    infer_source_authority_type,
+    infer_source_format,
+    normalize_candidate_taxonomy,
+)
 
 
 def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
@@ -21,6 +29,9 @@ def migrate_intake_schema(conn: sqlite3.Connection) -> None:
         "human_approval_id": "TEXT",
         "source_quality_score": "REAL",
         "canonical_reference_type": "TEXT",
+        "source_format": "TEXT",
+        "source_authority_type": "TEXT",
+        "publication_status": "TEXT",
     }
     for name, ddl in additions.items():
         if name not in columns:
@@ -33,6 +44,7 @@ def migrate_intake_schema(conn: sqlite3.Connection) -> None:
         WHERE mission_id IS NULL OR mission_id = ''
         """
     )
+    migrate_source_taxonomy_backfill(conn)
 
 
 def migrate_repository_schema(conn: sqlite3.Connection) -> None:
@@ -211,7 +223,150 @@ def migrate_intake_operational_schema(conn: sqlite3.Connection) -> None:
         "assigned_reviewer": "TEXT",
         "review_due_at": "TEXT",
         "review_priority": "TEXT",
+        "source_format": "TEXT",
+        "source_authority_type": "TEXT",
+        "publication_status": "TEXT",
     }
     for name, ddl in additions.items():
         if name not in columns:
             conn.execute(f"ALTER TABLE candidate_sources ADD COLUMN {name} {ddl}")
+
+    migrate_candidate_taxonomy_backfill(conn)
+
+
+def migrate_candidate_taxonomy_backfill(conn: sqlite3.Connection) -> None:
+    """Backfill taxonomy columns for legacy candidate records."""
+
+    if not _table_columns(conn, "candidate_sources"):
+        return
+    if "source_format" not in _table_columns(conn, "candidate_sources"):
+        return
+
+    rows = conn.execute("SELECT * FROM candidate_sources").fetchall()
+    for row in rows:
+        row_dict = dict(row)
+        if (
+            row_dict.get("source_format")
+            and row_dict.get("source_authority_type")
+            and row_dict.get("publication_status")
+            and row_dict.get("publication_status") != "unknown"
+        ):
+            continue
+        notes = row_dict.get("notes") or ""
+        reviewer_notes = row_dict.get("reviewer_notes") or ""
+        publication_status = infer_publication_status(
+            publication_status=row_dict.get("publication_status"),
+            license_status=row_dict.get("license_status"),
+            notes=notes,
+            reviewer_notes=reviewer_notes,
+        )
+        taxonomy = normalize_candidate_taxonomy(
+            source_type=row_dict.get("source_type"),
+            source_format=row_dict.get("source_format"),
+            source_authority_type=row_dict.get("source_authority_type"),
+            publication_status=publication_status,
+            license_status=row_dict.get("license_status"),
+            local_file_path=row_dict.get("local_file_path"),
+            url=row_dict.get("source_location"),
+            notes=notes,
+            reviewer_notes=reviewer_notes,
+        )
+        conn.execute(
+            """
+            UPDATE candidate_sources
+            SET source_format = ?, source_authority_type = ?, publication_status = ?
+            WHERE candidate_id = ?
+            """,
+            (
+                taxonomy["source_format"],
+                taxonomy["source_authority_type"],
+                taxonomy["publication_status"],
+                row_dict["candidate_id"],
+            ),
+        )
+
+
+def migrate_source_taxonomy_backfill(conn: sqlite3.Connection) -> None:
+    """Backfill taxonomy columns for legacy vault source records."""
+
+    if not _table_columns(conn, "sources"):
+        return
+    if "source_format" not in _table_columns(conn, "sources"):
+        return
+
+    rows = conn.execute("SELECT * FROM sources").fetchall()
+    for row in rows:
+        row_dict = dict(row)
+        metadata = json.loads(row_dict.get("metadata_json") or "{}")
+        authority_type = row_dict.get("source_authority_type")
+        publication_status = row_dict.get("publication_status")
+        if (
+            row_dict.get("source_format")
+            and authority_type
+            and authority_type != "unknown"
+            and publication_status
+            and publication_status != "unknown"
+        ):
+            continue
+        reviewer_notes = metadata.get("reviewer_notes") or ""
+        candidate_id = metadata.get("candidate_id")
+        linked_candidate = None
+        if candidate_id and _table_columns(conn, "candidate_sources"):
+            linked_candidate = conn.execute(
+                "SELECT source_type, source_authority_type, publication_status, notes, reviewer_notes, license_status FROM candidate_sources WHERE candidate_id = ?",
+                (candidate_id,),
+            ).fetchone()
+        if linked_candidate and (not publication_status or publication_status == "unknown"):
+            publication_status = infer_publication_status(
+                publication_status=linked_candidate["publication_status"],
+                license_status=linked_candidate["license_status"],
+                notes=linked_candidate["notes"],
+                reviewer_notes=linked_candidate["reviewer_notes"],
+            )
+        if not publication_status or publication_status == "unknown":
+            publication_status = infer_publication_status(
+                publication_status=publication_status,
+                license_status=row_dict.get("license"),
+                notes=metadata.get("notes"),
+                reviewer_notes=reviewer_notes,
+            )
+        source_format = row_dict.get("source_format") or infer_source_format(
+            local_file_path=metadata.get("original_path") or row_dict.get("filename"),
+        )
+        source_authority_type = row_dict.get("source_authority_type")
+        if linked_candidate and (not source_authority_type or source_authority_type == "unknown"):
+            source_authority_type = linked_candidate["source_authority_type"] or infer_source_authority_type(
+                source_type=linked_candidate["source_type"],
+            )
+        if not source_authority_type or source_authority_type == "unknown":
+            source_authority_type = infer_source_authority_type(
+                source_type=metadata.get("legacy_source_type") or metadata.get("source_type"),
+                source_authority_type=metadata.get("source_authority_type"),
+            )
+        legacy_source_type = metadata.get("legacy_source_type")
+        if linked_candidate and not legacy_source_type:
+            legacy_source_type = linked_candidate["source_type"]
+        metadata.update(
+            {
+                "source_format": source_format,
+                "source_authority_type": source_authority_type,
+                "legacy_source_type": legacy_source_type,
+                "publication_status": publication_status or "unknown",
+                "canonical_reference_type": row_dict.get("canonical_reference_type"),
+                "pack_ready": False,
+            }
+        )
+        conn.execute(
+            """
+            UPDATE sources
+            SET source_format = ?, source_authority_type = ?, publication_status = ?, metadata_json = ?
+            WHERE uuid = ?
+            """,
+            (
+                source_format,
+                source_authority_type,
+                publication_status or "unknown",
+                json.dumps(metadata),
+                row_dict["uuid"],
+            ),
+        )

@@ -1,4 +1,4 @@
-# Offgrid Minds Foundry Dashboard v1.2
+# Offgrid Minds Foundry Dashboard v1.25
 
 Foundry is the internal Mission Control dashboard for the Offgrid Minds knowledge
 factory. It reads real data from the Milestone 1–6 backend in
@@ -74,22 +74,34 @@ Required columns:
 
 - `title`
 - `publisher`
-- `source_type`
 - `mission_id`
 - `coverage_object_id`
 - `proposed_canonical_reference_type`
 - `submitted_by`
+- `source_authority_type` **or** legacy `source_type`
 
 Each row must include either `url` or `local_file_path`.
 
+Recommended taxonomy columns (v1.25):
+
+- `source_format` — file/container format (`pdf`, `html`, `image`, `slide_deck`, `book`, `manual`, `unknown`)
+- `source_authority_type` — trust/authority category (`government`, `university`, `extension`, `manufacturer`, `professional_org`, `official_field_guide`, `commercial_expert`, `nonprofit`, `unknown`)
+- `license_status` — `needs_review`, `internal_only`, `cleared`, `restricted`, `rejected`
+- `publication_status` — `not_publishable`, `internal_only`, `publishable`, `pack_ready`
+
+Legacy column (backward compatible):
+
+- `source_type` — deprecated authority alias; still accepted on import. Prefer `source_authority_type` for new rows.
+
 Optional columns:
 
-- `license_status`
 - `license_notes`
 - `authority_score`
 - `authority_reason`
 - `risk_notes`
 - `notes`
+
+If `source_format` is omitted, it is inferred from `local_file_path` or `url` when safe. Curator-001 evaluates **authority** from `source_authority_type`, not file format — a PDF from a government publisher is acceptable; a PDF with `unknown` authority is allowed into review with conservative risk notes.
 
 Mission and coverage IDs are written to `workspace.json` after bootstrap.
 
@@ -98,8 +110,8 @@ Mission and coverage IDs are written to `workspace.json` after bootstrap.
 Edit the CSV with a real source you control or have rights to review. Example for Trees:
 
 ```csv
-title,publisher,url,local_file_path,source_type,mission_id,coverage_object_id,proposed_canonical_reference_type,submitted_by,license_status,license_notes,authority_score,authority_reason,risk_notes,notes
-USFS Red Maple Guide,United States Forest Service,,/path/to/usfs-trees.txt,government,<mission_id>,<coverage_object_id>,government_publication,human:researcher:001,public_domain_or_government_work,To be verified manually.,0.95,Government forestry publisher.,,Real candidate for intake.
+title,publisher,url,local_file_path,source_format,source_authority_type,source_type,mission_id,coverage_object_id,proposed_canonical_reference_type,submitted_by,license_status,publication_status,license_notes,authority_score,authority_reason,risk_notes,notes
+USFS Red Maple Guide,United States Forest Service,,/path/to/usfs-trees.pdf,pdf,government,government,<mission_id>,<coverage_object_id>,government_publication,human:researcher:001,needs_review,publishable,To be verified manually.,0.95,Government forestry publisher.,,Real candidate for intake.
 ```
 
 Use the mission and coverage object IDs from `workspace.json`.
@@ -274,11 +286,29 @@ The dashboard is read-only. Approve and intake actions are CLI-only in v1.2.
 - No OCR, embeddings, pack compilation, or autonomous crawling
 - License strict review is optional (`strict_license_review=False` by default in intake CLI)
 
+## Source Taxonomy and Publication Safety (v1.25)
+
+Foundry v1.25 separates **file format** from **authority/trust** and adds publication safety metadata before pack compilation exists:
+
+| Field | Purpose |
+|---|---|
+| `source_format` | How the source is stored (pdf, html, slide_deck, …) |
+| `source_authority_type` | Who published it and how much to trust it |
+| `proposed_canonical_reference_type` | CRS requirement matching (unchanged) |
+| `license_status` | License review state |
+| `publication_status` | Whether the source may ever ship in an Expert Pack |
+
+Publication safety rules:
+
+- `internal_only` and `not_publishable` sources are never treated as pack-ready
+- `publication_warnings` are stored on vault intake for downstream pack tooling
+- Existing candidates keep legacy `source_type`; migrations infer format/authority where safe
+
 ## Next Recommended Milestone
 
 Foundry v1.3 should add:
 
-- candidate detail pages in the dashboard
+- candidate detail pages in the dashboard (including taxonomy and publication badges)
 - mission detail pages with linked CRS requirements
 - browser-based review UI with explicit approve/reject actions (still human-gated)
 - workspace manifest panel with bootstrap metadata and file paths

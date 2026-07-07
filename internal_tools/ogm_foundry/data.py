@@ -225,6 +225,13 @@ class FoundryDataReader:
                     "mission_id": row["mission_id"],
                     "coverage_object_id": row["coverage_object_id"],
                     "proposed_canonical_reference_type": row["proposed_canonical_reference_type"],
+                    "source_format": row.get("source_format"),
+                    "source_authority_type": row.get("source_authority_type"),
+                    "source_type": row.get("source_type"),
+                    "license_status": row.get("license_status"),
+                    "publication_status": row.get("publication_status"),
+                    "pack_ready": row.get("pack_ready", False),
+                    "publication_warnings": row.get("publication_warnings") or [],
                     "curator_recommendation_id": row.get("curator_recommendation_id"),
                     "submitted_at": row["submitted_at"],
                     "has_local_file": bool(row.get("local_file_path")),
@@ -313,9 +320,11 @@ class FoundryDataReader:
             except sqlite3.Error as exc:
                 message = f"Unable to read intake ledger: {exc}"
                 placeholder = True
+                source_rows = []
         else:
             message = "Intake database not configured."
             placeholder = True
+            source_rows = []
 
         if availability.vault_root:
             for path in self.config.vault_root.rglob("*"):
@@ -329,6 +338,21 @@ class FoundryDataReader:
             "sources": sources,
             "revisions": revisions,
             "archived_bytes": archived_bytes,
+            "items": [
+                {
+                    "source_uuid": source.get("uuid"),
+                    "filename": source.get("filename"),
+                    "source_format": source.get("source_format") or source.get("metadata", {}).get("source_format"),
+                    "source_authority_type": source.get("source_authority_type")
+                    or source.get("metadata", {}).get("source_authority_type"),
+                    "license_status": source.get("license"),
+                    "publication_status": source.get("publication_status")
+                    or source.get("metadata", {}).get("publication_status"),
+                    "canonical_reference_type": source.get("canonical_reference_type"),
+                    "pack_ready": source.get("metadata", {}).get("pack_ready", False),
+                }
+                for source in source_rows
+            ],
             "placeholder": placeholder,
             "message": message if sources == 0 else None,
         }

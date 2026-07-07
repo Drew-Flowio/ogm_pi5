@@ -107,6 +107,9 @@ class IntakeLedger:
         human_approval_id: str | None = None,
         source_quality_score: float | None = None,
         canonical_reference_type: str | None = None,
+        source_format: str | None = None,
+        source_authority_type: str | None = None,
+        publication_status: str | None = None,
         actor: str = "system",
     ) -> dict[str, Any]:
         if approval_status != "approved":
@@ -137,9 +140,10 @@ class IntakeLedger:
                     mission, curator, approval_status, processing_state, mime_type,
                     size_bytes, current_revision_uuid, metadata_json, created_at, updated_at,
                     mission_id, coverage_object_ids_json, curator_recommendation_id,
-                    human_approval_id, source_quality_score, canonical_reference_type
+                    human_approval_id, source_quality_score, canonical_reference_type,
+                    source_format, source_authority_type, publication_status
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     source_uuid,
@@ -163,6 +167,9 @@ class IntakeLedger:
                     human_approval_id,
                     source_quality_score,
                     canonical_reference_type,
+                    source_format,
+                    source_authority_type,
+                    publication_status,
                 ),
             )
 

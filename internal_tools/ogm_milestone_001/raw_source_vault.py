@@ -40,6 +40,9 @@ class RawSourceVault:
         human_approval_id: str | None = None,
         source_quality_score: float | None = None,
         canonical_reference_type: str | None = None,
+        source_format: str | None = None,
+        source_authority_type: str | None = None,
+        publication_status: str | None = None,
         actor: str = "system",
     ) -> dict[str, Any]:
         """Store an approved source file and create ledger records.
@@ -108,6 +111,9 @@ class RawSourceVault:
             human_approval_id=human_approval_id,
             source_quality_score=source_quality_score,
             canonical_reference_type=canonical_reference_type,
+            source_format=source_format,
+            source_authority_type=source_authority_type,
+            publication_status=publication_status,
             actor=actor,
         )
         revision_record = self.ledger.add_revision(

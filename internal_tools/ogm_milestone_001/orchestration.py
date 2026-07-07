@@ -55,6 +55,9 @@ def approved_candidate_to_repository_evidence(
             human_approval_id=intake_payload["human_approval_id"],
             source_quality_score=intake_payload["source_quality_score"],
             canonical_reference_type=intake_payload["canonical_reference_type"],
+            source_format=intake_payload.get("source_format"),
+            source_authority_type=intake_payload.get("source_authority_type"),
+            publication_status=intake_payload.get("publication_status"),
             actor=actor,
         )
         revision = source["revision"]

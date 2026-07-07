@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 PACK_ID = "ogm.pack.north-american-outdoor"
 PACK_TITLE = "North American Outdoor Expert Pack"
 WORKSPACE_ID = "foundry:north-american-outdoor:v1"
-WORKSPACE_VERSION = "1.1"
+WORKSPACE_VERSION = "1.25"
 
 
 @dataclass(frozen=True)
@@ -138,12 +138,15 @@ CANDIDATE_TEMPLATE_FIELDS: tuple[str, ...] = (
     "publisher",
     "url",
     "local_file_path",
+    "source_format",
+    "source_authority_type",
     "source_type",
     "mission_id",
     "coverage_object_id",
     "proposed_canonical_reference_type",
     "submitted_by",
     "license_status",
+    "publication_status",
     "license_notes",
     "authority_score",
     "authority_reason",
@@ -155,10 +158,10 @@ CANDIDATE_REQUIRED_FIELDS: frozenset[str] = frozenset(
     {
         "title",
         "publisher",
-        "source_type",
         "mission_id",
         "coverage_object_id",
         "proposed_canonical_reference_type",
         "submitted_by",
     }
 )
+

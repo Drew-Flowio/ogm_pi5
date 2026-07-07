@@ -108,12 +108,15 @@ def evaluate_candidates(
             suggested_coverage_object_id=normalized["suggested_coverage_object_id"],
             reason_recommended=normalized["reason_recommended"],
             risks_limitations=normalized["risks_limitations"],
-            metadata={
-                "curator_id": services.curator.CURATOR_ID,
-                "policy_decision": normalized["decision"],
-                "queued_candidate": True,
-                "candidate_id": candidate["candidate_id"],
-            },
+                metadata={
+                    "curator_id": services.curator.CURATOR_ID,
+                    "policy_decision": normalized["decision"],
+                    "queued_candidate": True,
+                    "candidate_id": candidate["candidate_id"],
+                    "source_format": normalized.get("source_format"),
+                    "source_authority_type": normalized.get("source_authority_type"),
+                    "publication_status": normalized.get("publication_status"),
+                },
         )
         services.queue.update_candidate_review(
             candidate["candidate_id"],

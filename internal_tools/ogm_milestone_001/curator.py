@@ -7,6 +7,11 @@ from typing import Any
 from internal_tools.ogm_milestone_001.coverage import CoverageStore
 from internal_tools.ogm_milestone_001.crs_evaluation import CRSEvaluator
 from internal_tools.ogm_milestone_001.records import OperationalRecords
+from internal_tools.ogm_milestone_001.source_taxonomy import (
+    AVOID_AUTHORITY_TYPES,
+    TRUSTED_AUTHORITY_TYPES,
+    infer_source_authority_type,
+)
 from internal_tools.ogm_milestone_001.utils import prefixed_uuid
 
 
@@ -23,22 +28,8 @@ class Curator001:
     SUPPORTED_DOMAIN = "outdoor"
     SUPPORTED_SUBCATEGORY = "trees"
 
-    TRUSTED_SOURCE_TYPES = {
-        "government",
-        "government_publication",
-        "university",
-        "professional_organization",
-        "official_field_guide",
-        "public_domain_reference",
-        "manufacturer_manual",
-    }
-    AVOID_SOURCE_TYPES = {
-        "blog",
-        "random_blog",
-        "ai_generated",
-        "seo_content",
-        "forum",
-    }
+    TRUSTED_SOURCE_TYPES = TRUSTED_AUTHORITY_TYPES
+    AVOID_SOURCE_TYPES = AVOID_AUTHORITY_TYPES
     MINIMUM_AUTHORITY_SCORE = 0.7
 
     def __init__(
@@ -193,7 +184,16 @@ class Curator001:
             "title": self._required(candidate, "title"),
             "publisher": self._required(candidate, "publisher"),
             "source_location": candidate.get("url") or candidate.get("source_location"),
-            "source_type": self._required(candidate, "source_type"),
+            "source_type": candidate.get("source_type") or infer_source_authority_type(
+                source_authority_type=candidate.get("source_authority_type"),
+                source_type=candidate.get("source_type"),
+            ),
+            "source_format": candidate.get("source_format"),
+            "source_authority_type": infer_source_authority_type(
+                source_authority_type=candidate.get("source_authority_type"),
+                source_type=candidate.get("source_type"),
+            ),
+            "publication_status": candidate.get("publication_status") or "unknown",
             "authority_score": float(candidate.get("authority_score", 0.0)),
             "license_status": self._required(candidate, "license_status"),
             "coverage_contribution": self._required(candidate, "coverage_contribution"),
@@ -209,19 +209,31 @@ class Curator001:
         if not 0 <= normalized["authority_score"] <= 1:
             raise ValueError("authority_score must be between 0 and 1")
 
-        source_type = normalized["source_type"].lower()
+        authority_type = normalized["source_authority_type"].lower()
         risks = normalized["risks_limitations"]
-        if source_type in self.AVOID_SOURCE_TYPES:
+        if authority_type in self.AVOID_SOURCE_TYPES:
             normalized["decision"] = "reject"
-            normalized["risks_limitations"] = risks + ["Source type is excluded by Curator-001 policy."]
-        elif source_type not in self.TRUSTED_SOURCE_TYPES:
-            normalized["decision"] = "reject"
-            normalized["risks_limitations"] = risks + ["Source type is not in the trusted source policy."]
-        elif normalized["authority_score"] < self.MINIMUM_AUTHORITY_SCORE:
-            normalized["decision"] = "reject"
-            normalized["risks_limitations"] = risks + ["Authority score is below Curator-001 threshold."]
+            normalized["risks_limitations"] = risks + ["Authority type is excluded by Curator-001 policy."]
+        elif authority_type in self.TRUSTED_SOURCE_TYPES:
+            if normalized["authority_score"] < self.MINIMUM_AUTHORITY_SCORE:
+                normalized["decision"] = "reject"
+                normalized["risks_limitations"] = risks + ["Authority score is below Curator-001 threshold."]
+            else:
+                normalized["decision"] = "recommend"
+        elif authority_type == "unknown":
+            if normalized["authority_score"] < self.MINIMUM_AUTHORITY_SCORE:
+                normalized["decision"] = "reject"
+                normalized["risks_limitations"] = risks + [
+                    "Authority type unknown and authority score is below Curator-001 threshold."
+                ]
+            else:
+                normalized["decision"] = "recommend"
+                normalized["risks_limitations"] = risks + [
+                    "Authority type unknown; candidate allowed for human review with conservative scoring."
+                ]
         else:
-            normalized["decision"] = "recommend"
+            normalized["decision"] = "reject"
+            normalized["risks_limitations"] = risks + ["Authority type is not in the trusted source policy."]
         return normalized
 
     def require_human_approval_for_intake(self, recommendation_id: str) -> dict[str, Any]:
@@ -235,6 +247,9 @@ class Curator001:
             "publisher": candidate["publisher"],
             "source_location": candidate["source_location"],
             "source_type": candidate["source_type"],
+            "source_format": candidate.get("source_format"),
+            "source_authority_type": candidate.get("source_authority_type"),
+            "publication_status": candidate.get("publication_status"),
             "authority_score": candidate.get("authority_score") or 0.0,
             "license_status": candidate.get("license_status") or "unknown",
             "coverage_contribution": (
