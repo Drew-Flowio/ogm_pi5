@@ -1,4 +1,4 @@
-# Offgrid Minds Foundry Dashboard v1.25
+# Offgrid Minds Foundry Dashboard v1.3
 
 Foundry is the internal Mission Control dashboard for the Offgrid Minds knowledge
 factory. It reads real data from the Milestone 1–6 backend in
@@ -261,7 +261,12 @@ The dashboard is read-only. Approve and intake actions are CLI-only in v1.2.
 | `/api/repository/counts` | Repository counts |
 | `/api/vault/counts` | Vault counts |
 | `/api/curator/status` | Curator recommendation/approval counts |
-| `/api/events/recent?limit=20` | Recent audit/review events |
+| `/api/missions/{mission_id}` | Mission detail with CRS, candidates, timeline |
+| `/api/coverage/{coverage_object_id}` | Coverage detail with CRS, evidence, candidates |
+| `/api/candidates/{candidate_id}` | Candidate detail with review events and vault links |
+| `/api/vault/sources/{source_uuid}` | Vault source detail with revisions and evidence |
+| `/api/evidence/{evidence_uuid}` | Evidence detail with coverage and vault links |
+| `/api/events/timeline?entity_id=...&limit=50` | Entity-scoped audit/review timeline |
 
 ## CLI Commands Summary
 
@@ -306,10 +311,19 @@ Publication safety rules:
 
 ## Next Recommended Milestone
 
-Foundry v1.3 should add:
+Foundry v1.3 adds read-only detail pages in the dashboard:
 
-- candidate detail pages in the dashboard (including taxonomy and publication badges)
-- mission detail pages with linked CRS requirements
+- Mission detail — linked coverage, CRS, candidates, curator activity
+- Coverage detail — CRS matrix, linked evidence and candidates
+- Candidate detail — taxonomy, workflow links, review events
+- Vault source detail — revisions, evidence bridge, publication safety
+- Evidence detail — provenance, coverage links, vault cross-refs
+- Audit/review timeline — entity-scoped history on every detail page
+
+Open the dashboard and click any mission, coverage row, candidate, vault source, or recent event to navigate. URLs use hash routes such as `#/candidates/cand:...`.
+
+Foundry v1.4 should add:
+
 - browser-based review UI with explicit approve/reject actions (still human-gated)
 - workspace manifest panel with bootstrap metadata and file paths
 

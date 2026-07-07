@@ -1,4 +1,4 @@
-"""Foundry Dashboard v1 HTTP server."""
+"""Foundry Dashboard v1.3 HTTP server."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import mimetypes
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Callable
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from internal_tools.ogm_foundry.config import FoundryConfig
 from internal_tools.ogm_foundry.data import FoundryDataReader
@@ -18,7 +18,7 @@ STATIC_DIR = PACKAGE_ROOT / "static"
 
 
 class FoundryRequestHandler(SimpleHTTPRequestHandler):
-    server_version = "OGMFoundry/0.1"
+    server_version = "OGMFoundry/1.3"
 
     def __init__(
         self,
@@ -51,6 +51,41 @@ class FoundryRequestHandler(SimpleHTTPRequestHandler):
 
     def handle_api(self, path: str, query: dict[str, list[str]]) -> None:
         reader = self.reader_factory()
+
+        if path == "/api/events/recent":
+            limit = int(query.get("limit", ["20"])[0])
+            self.send_json(reader.recent_events(limit=limit))
+            return
+
+        if path == "/api/events/timeline":
+            entity_id = query.get("entity_id", [""])[0]
+            if not entity_id:
+                self.send_json({"error": "entity_id is required"}, status=400)
+                return
+            entity_type = query.get("entity_type", [None])[0]
+            limit = int(query.get("limit", ["50"])[0])
+            self.send_json(reader.entity_timeline(entity_type=entity_type, entity_id=entity_id, limit=limit))
+            return
+
+        detail_handlers = (
+            ("/api/missions/", reader.mission_detail),
+            ("/api/coverage/", reader.coverage_detail),
+            ("/api/candidates/", reader.candidate_detail),
+            ("/api/vault/sources/", reader.vault_source_detail),
+            ("/api/evidence/", reader.evidence_detail),
+        )
+        for prefix, handler in detail_handlers:
+            if path.startswith(prefix):
+                entity_id = unquote(path[len(prefix) :])
+                if not entity_id:
+                    self.send_json({"error": "Missing entity id", "path": path}, status=400)
+                    return
+                try:
+                    self.send_json(handler(entity_id))
+                except KeyError as exc:
+                    self.send_json({"error": str(exc)}, status=404)
+                return
+
         routes = {
             "/api/dashboard/summary": reader.dashboard_summary,
             "/api/health": reader.health,
@@ -63,10 +98,6 @@ class FoundryRequestHandler(SimpleHTTPRequestHandler):
             "/api/vault/counts": reader.vault_counts,
             "/api/curator/status": reader.curator_status,
         }
-        if path == "/api/events/recent":
-            limit = int(query.get("limit", ["20"])[0])
-            self.send_json(reader.recent_events(limit=limit))
-            return
         handler = routes.get(path)
         if handler is None:
             self.send_json({"error": "Unknown API endpoint", "path": path}, status=404)
@@ -113,7 +144,7 @@ def main() -> None:
     config = FoundryConfig.from_env()
     config.data_root.mkdir(parents=True, exist_ok=True)
     server = create_server(config)
-    print("Offgrid Minds Foundry Dashboard v1")
+    print("Offgrid Minds Foundry Dashboard v1.3")
     print(f"Dashboard: http://{config.host}:{config.port}/")
     print(f"Intake DB: {config.intake_db}")
     print(f"Repository DB: {config.repository_db}")

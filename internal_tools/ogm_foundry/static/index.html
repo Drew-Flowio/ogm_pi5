@@ -21,6 +21,7 @@
         </div>
       </header>
 
+      <div id="dashboard-view">
       <section class="metrics-grid" id="metrics-grid">
         <article class="metric-card">
           <div class="metric-label">Knowledge Objects</div>
@@ -245,6 +246,29 @@
           </div>
         </section>
       </main>
+      </div>
+
+      <div id="detail-view" class="detail-view hidden">
+        <div class="detail-toolbar">
+          <button class="refresh-btn" id="detail-back-btn" type="button">← Back to dashboard</button>
+          <div class="meta-chip subtle" id="detail-generated-at">—</div>
+        </div>
+        <header class="detail-header">
+          <div class="brand-kicker" id="detail-kicker">Detail</div>
+          <h2 id="detail-title">—</h2>
+          <p class="detail-subtitle mono" id="detail-subtitle">—</p>
+        </header>
+        <main class="detail-grid" id="detail-content"></main>
+        <section class="panel span-2 detail-timeline">
+          <div class="panel-head">
+            <h2>Audit / Review Timeline</h2>
+            <span class="panel-tag" id="detail-timeline-tag">Entity history</span>
+          </div>
+          <div class="panel-body">
+            <div class="timeline" id="detail-timeline"></div>
+          </div>
+        </section>
+      </div>
     </div>
     <script src="/static/app.js"></script>
   </body>

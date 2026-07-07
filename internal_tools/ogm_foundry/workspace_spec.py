@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 PACK_ID = "ogm.pack.north-american-outdoor"
 PACK_TITLE = "North American Outdoor Expert Pack"
 WORKSPACE_ID = "foundry:north-american-outdoor:v1"
-WORKSPACE_VERSION = "1.25"
+WORKSPACE_VERSION = "1.3"
 
 
 @dataclass(frozen=True)

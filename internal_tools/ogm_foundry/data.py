@@ -478,6 +478,336 @@ class FoundryDataReader:
             "message": None if missions else "No missions recorded yet.",
         }
 
+    def mission_detail(self, mission_id: str) -> dict[str, Any]:
+        if not self.availability().intake_db:
+            raise KeyError(f"unknown mission: {mission_id}")
+        records = OperationalRecords(self.config.intake_db)
+        mission = records.get_mission(mission_id)
+        coverage_ids = mission.get("metadata", {}).get("coverage_object_ids") or []
+        coverage_objects: list[dict[str, Any]] = []
+        crs_items: list[dict[str, Any]] = []
+        if self.availability().repository_db:
+            coverage_store = CoverageStore(self.config.repository_db)
+            for coverage_object_id in coverage_ids:
+                try:
+                    coverage_objects.append(coverage_store.get_coverage_object(coverage_object_id))
+                except KeyError:
+                    continue
+                crs_items.append(self._coverage_crs_item(coverage_object_id))
+        queue = CandidateIntakeQueue(self.config.intake_db)
+        candidates = queue.list_candidates(mission_id=mission_id)
+        return {
+            "mission_id": mission_id,
+            "mission": mission,
+            "coverage_objects": coverage_objects,
+            "crs": crs_items,
+            "candidates": [self._candidate_summary(row) for row in candidates],
+            "recommendations": records.list_curator_recommendations(mission_id=mission_id),
+            "approvals": records.list_human_approvals(mission_id=mission_id),
+            "timeline": self.entity_timeline(entity_id=mission_id, limit=25),
+        }
+
+    def coverage_detail(self, coverage_object_id: str) -> dict[str, Any]:
+        if not self.availability().repository_db:
+            raise KeyError(f"unknown coverage object: {coverage_object_id}")
+        coverage_store = CoverageStore(self.config.repository_db)
+        coverage_object = coverage_store.get_coverage_object(coverage_object_id)
+        evidence_ids = coverage_store.list_coverage_for_evidence_by_object(coverage_object_id)
+        evidence_items: list[dict[str, Any]] = []
+        if evidence_ids:
+            repository = KnowledgeRepository(self.config.repository_db)
+            for evidence_uuid in evidence_ids:
+                try:
+                    evidence_items.append(self._evidence_summary(repository.get_evidence(evidence_uuid)))
+                except KeyError:
+                    continue
+        mission = self._mission_for_coverage_object(coverage_object_id)
+        candidates: list[dict[str, Any]] = []
+        if self.availability().intake_db:
+            queue = CandidateIntakeQueue(self.config.intake_db)
+            candidates = [self._candidate_summary(row) for row in queue.list_candidates(coverage_object_id=coverage_object_id)]
+        return {
+            "coverage_object_id": coverage_object_id,
+            "coverage_object": coverage_object,
+            "crs": self._coverage_crs_item(coverage_object_id),
+            "mission": mission,
+            "candidates": candidates,
+            "evidence": evidence_items,
+            "timeline": self.entity_timeline(entity_id=coverage_object_id, limit=25),
+        }
+
+    def candidate_detail(self, candidate_id: str) -> dict[str, Any]:
+        if not self.availability().intake_db:
+            raise KeyError(f"unknown candidate source: {candidate_id}")
+        queue = CandidateIntakeQueue(self.config.intake_db)
+        candidate = queue.get_candidate(candidate_id)
+        review_events = queue.list_review_events(candidate_id)
+        recommendation = None
+        approval = None
+        records = OperationalRecords(self.config.intake_db)
+        if candidate.get("curator_recommendation_id"):
+            try:
+                recommendation = records.get_curator_recommendation(candidate["curator_recommendation_id"])
+            except KeyError:
+                recommendation = None
+        for item in records.list_human_approvals():
+            if item.get("target_id") == candidate_id:
+                approval = item
+                break
+        vault_source = self._vault_source_for_candidate(candidate_id)
+        evidence_items: list[dict[str, Any]] = []
+        if vault_source and self.availability().repository_db:
+            repository = KnowledgeRepository(self.config.repository_db)
+            for row in repository.list_evidence(source_uuid=vault_source["uuid"]):
+                evidence_items.append(self._evidence_summary(row))
+        return {
+            "candidate_id": candidate_id,
+            "candidate": candidate,
+            "review_events": review_events,
+            "recommendation": recommendation,
+            "approval": approval,
+            "vault_source": vault_source,
+            "evidence": evidence_items,
+            "timeline": self.entity_timeline(entity_id=candidate_id, limit=50),
+        }
+
+    def vault_source_detail(self, source_uuid: str) -> dict[str, Any]:
+        if not self.availability().intake_db:
+            raise KeyError(f"unknown source: {source_uuid}")
+        ledger = IntakeLedger(self.config.intake_db)
+        source = ledger.get_source(source_uuid)
+        revisions = ledger.list_revisions(source_uuid)
+        candidate = None
+        candidate_id = source.get("metadata", {}).get("candidate_id")
+        if candidate_id:
+            try:
+                candidate = CandidateIntakeQueue(self.config.intake_db).get_candidate(candidate_id)
+            except KeyError:
+                candidate = None
+        evidence_items: list[dict[str, Any]] = []
+        if self.availability().repository_db:
+            repository = KnowledgeRepository(self.config.repository_db)
+            for row in repository.list_evidence(source_uuid=source_uuid):
+                evidence_items.append(self._evidence_summary(row))
+        return {
+            "source_uuid": source_uuid,
+            "source": source,
+            "revisions": revisions,
+            "candidate": candidate,
+            "evidence": evidence_items,
+            "timeline": self.entity_timeline(entity_id=source_uuid, limit=50),
+        }
+
+    def evidence_detail(self, evidence_uuid: str) -> dict[str, Any]:
+        if not self.availability().repository_db:
+            raise KeyError(f"unknown evidence: {evidence_uuid}")
+        repository = KnowledgeRepository(self.config.repository_db)
+        evidence = repository.get_evidence(evidence_uuid)
+        coverage_store = CoverageStore(self.config.repository_db)
+        coverage_object_ids = coverage_store.list_coverage_for_evidence(evidence_uuid)
+        coverage_objects = []
+        for coverage_object_id in coverage_object_ids:
+            try:
+                coverage_objects.append(coverage_store.get_coverage_object(coverage_object_id))
+            except KeyError:
+                continue
+        vault_source = None
+        if evidence.get("source_uuid") and self.availability().intake_db:
+            try:
+                vault_source = IntakeLedger(self.config.intake_db).get_source(evidence["source_uuid"])
+            except KeyError:
+                vault_source = None
+        return {
+            "evidence_uuid": evidence_uuid,
+            "evidence": evidence,
+            "coverage_objects": coverage_objects,
+            "vault_source": vault_source,
+            "timeline": self.entity_timeline(entity_id=evidence_uuid, limit=50),
+        }
+
+    def entity_timeline(
+        self,
+        *,
+        entity_type: str | None = None,
+        entity_id: str,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        events: list[dict[str, Any]] = []
+        availability = self.availability()
+
+        if availability.intake_db:
+            try:
+                ledger = IntakeLedger(self.config.intake_db)
+                for row in ledger.list_audit_events(entity_id):
+                    events.append(self._normalize_timeline_event(row, source="intake"))
+            except sqlite3.Error:
+                pass
+            if entity_type in {None, "candidate_source", "candidate"} and entity_id.startswith("cand:"):
+                try:
+                    queue = CandidateIntakeQueue(self.config.intake_db)
+                    for row in queue.list_review_events(entity_id):
+                        events.append(
+                            {
+                                "event_id": row["event_id"],
+                                "timestamp": row["timestamp"],
+                                "actor": row["actor"],
+                                "action": f"candidate_{row['to_status']}",
+                                "entity_type": "candidate_source",
+                                "entity_id": row["candidate_id"],
+                                "details": {
+                                    "from_status": row.get("from_status"),
+                                    "to_status": row.get("to_status"),
+                                    "reason": row.get("reason"),
+                                    "notes": row.get("notes"),
+                                },
+                                "source": "candidate_review",
+                            }
+                        )
+                except (sqlite3.Error, KeyError):
+                    pass
+            events.extend(
+                event
+                for event in self._jsonl_audit_events(
+                    self.config.intake_db.with_suffix(".audit.jsonl"),
+                    source="intake_log",
+                )
+                if event.get("entity_id") == entity_id
+            )
+
+        if availability.repository_db:
+            try:
+                repository = KnowledgeRepository(self.config.repository_db)
+                for row in repository.list_audit_events(entity_id):
+                    events.append(self._normalize_timeline_event(row, source="repository"))
+            except sqlite3.Error:
+                pass
+            events.extend(
+                event
+                for event in self._jsonl_audit_events(
+                    self.config.repository_db.with_suffix(".audit.jsonl"),
+                    source="repository_log",
+                )
+                if event.get("entity_id") == entity_id
+            )
+
+        events.sort(key=lambda item: item.get("timestamp", ""))
+        trimmed = events[-limit:] if limit else events
+        return {
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "items": trimmed,
+            "count": len(trimmed),
+        }
+
+    def _candidate_summary(self, row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "candidate_id": row["candidate_id"],
+            "title": row["title"],
+            "publisher": row["publisher"],
+            "status": row["status"],
+            "mission_id": row["mission_id"],
+            "coverage_object_id": row["coverage_object_id"],
+            "proposed_canonical_reference_type": row["proposed_canonical_reference_type"],
+            "source_format": row.get("source_format"),
+            "source_authority_type": row.get("source_authority_type"),
+            "source_type": row.get("source_type"),
+            "license_status": row.get("license_status"),
+            "publication_status": row.get("publication_status"),
+            "pack_ready": row.get("pack_ready", False),
+            "submitted_at": row.get("submitted_at"),
+        }
+
+    def _evidence_summary(self, row: dict[str, Any]) -> dict[str, Any]:
+        metadata = row.get("metadata") or {}
+        provenance = metadata.get("provenance") or {}
+        return {
+            "evidence_uuid": row["evidence_uuid"],
+            "source_uuid": row.get("source_uuid"),
+            "raw_revision_uuid": row.get("raw_revision_uuid"),
+            "created_at": row.get("created_at"),
+            "canonical_reference_type": provenance.get("canonical_reference_type"),
+            "license_status": provenance.get("license"),
+            "coverage_object_ids": provenance.get("coverage_object_ids") or [],
+        }
+
+    def _coverage_crs_item(self, coverage_object_id: str) -> dict[str, Any]:
+        if not self.availability().repository_db:
+            return {"coverage_object_id": coverage_object_id, "requirements": [], "missing_crs_requirements": []}
+        coverage_store = CoverageStore(self.config.repository_db)
+        coverage_object = coverage_store.get_coverage_object(coverage_object_id)
+        requirements = coverage_store.list_canonical_reference_requirements(coverage_object_id)
+        missing_requirements: list[dict[str, Any]] = []
+        if self.availability().intake_db:
+            try:
+                evaluator = CRSEvaluator(
+                    coverage_store,
+                    ledger=IntakeLedger(self.config.intake_db),
+                    repository=KnowledgeRepository(self.config.repository_db),
+                )
+                score = evaluator.score_coverage(coverage_object_id)
+                missing_requirements = [
+                    {
+                        "reference_type": req["reference_type"],
+                        "minimum_authority": req.get("minimum_authority"),
+                        "label": req.get("metadata", {}).get("label"),
+                    }
+                    for req in score["missing_crs_requirements"]
+                ]
+            except sqlite3.Error:
+                missing_requirements = []
+        return {
+            "coverage_object_id": coverage_object_id,
+            "title": coverage_object["title"],
+            "status": coverage_object["status"],
+            "coverage_percentage": coverage_object["coverage_percentage"],
+            "required_crs_count": len(requirements),
+            "missing_crs_count": len(missing_requirements),
+            "missing_crs_requirements": missing_requirements,
+            "requirements": [
+                {
+                    "requirement_id": req["requirement_id"],
+                    "reference_type": req["reference_type"],
+                    "minimum_authority": req["minimum_authority"],
+                    "label": req.get("metadata", {}).get("label"),
+                }
+                for req in requirements
+            ],
+        }
+
+    def _mission_for_coverage_object(self, coverage_object_id: str) -> dict[str, Any] | None:
+        for mission in self._safe_list_missions():
+            coverage_ids = mission.get("metadata", {}).get("coverage_object_ids") or []
+            if coverage_object_id in coverage_ids:
+                return mission
+        return None
+
+    def _vault_source_for_candidate(self, candidate_id: str) -> dict[str, Any] | None:
+        if not self.availability().intake_db:
+            return None
+        ledger = IntakeLedger(self.config.intake_db)
+        for source in ledger.list_sources():
+            if source.get("metadata", {}).get("candidate_id") == candidate_id:
+                return source
+        return None
+
+    def _normalize_timeline_event(self, row: dict[str, Any], *, source: str) -> dict[str, Any]:
+        details = row.get("details")
+        if details is None and "details_json" in row:
+            try:
+                details = json.loads(row["details_json"] or "{}")
+            except json.JSONDecodeError:
+                details = {"raw": row["details_json"]}
+        return {
+            "event_id": row.get("audit_id") or row.get("event_id"),
+            "timestamp": row["timestamp"],
+            "actor": row["actor"],
+            "action": row["action"],
+            "entity_type": row["entity_type"],
+            "entity_id": row["entity_id"],
+            "details": details or {},
+            "source": source,
+        }
+
     def _safe_list_missions(self) -> list[dict[str, Any]]:
         if not self.availability().intake_db:
             return []
